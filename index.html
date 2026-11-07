@@ -78,6 +78,8 @@ html,body{min-height:100%;font-family:var(--font);background:var(--bg);color:var
 .hero-logo-wrap{flex-shrink:0;position:relative;z-index:1}
 .hero-logo-img{width:160px;height:160px;object-fit:contain;display:none}
 .hero-logo-placeholder{width:130px;height:130px;border-radius:var(--radius-lg);border:1px dashed var(--gold-border);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;cursor:pointer;background:var(--surface);transition:border-color .2s}
+.hero-logo-placeholder{display:none}
+.hero-logo-img,.nav-logo-img{transition:opacity .35s ease}
 .hero-logo-placeholder:hover{border-color:var(--gold-border2)}
 .hero-logo-placeholder span{font-size:11px;color:var(--text3);text-align:center;padding:0 10px;line-height:1.4}
 .hero-text{flex:1;min-width:240px;position:relative;z-index:1}
@@ -676,6 +678,12 @@ function initFirebase() {
         }
         bingoDbFs.collection('users').doc(user.uid).get().then(function(snap) {
           bingoUserProfile = snap.exists ? snap.data() : {};
+          try {
+            var _p = bingoUserProfile || {};
+            var _adm = !!(_p.role === 'admin' || (_p.adminAccess && (_p.adminAccess.bingo || _p.adminAccess.player || _p.adminAccess.mediaplayer)));
+            localStorage.setItem('bella_gw_profile', JSON.stringify({ uid: user.uid, name: _p.name || user.email || '', email: user.email || '', admin: _adm, ts: Date.now() }));
+          } catch(e) {}
+          refreshLogoPH();
           if (bingoUserProfile.status === 'banned') {
             document.body.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#b0505a;font-family:sans-serif;padding:2rem;text-align:center;">This account is currently restricted.</div>';
             return;
@@ -833,13 +841,30 @@ function esc(str) {
 }
 
 // ── LOGO ──────────────────────────────────────────────────────────────────────
+var _logoUrl = null;
+function refreshLogoPH() {
+  var ph = document.getElementById('hero-logo-placeholder');
+  if (!ph) return;
+  // the "add logo" box is only ever for an admin, and only once we KNOW there is no logo
+  ph.style.display = (_logoUrl === '' && typeof likesIsAdmin === 'function' && likesIsAdmin()) ? 'flex' : 'none';
+}
 function applyLogo(url) {
   var ni = document.getElementById('nav-logo-img');
   var hi = document.getElementById('hero-logo-img');
-  var ph = document.getElementById('hero-logo-placeholder');
-  if (url) { ni.src=url; ni.style.display='block'; hi.src=url; hi.style.display='block'; ph.style.display='none'; }
-  else { ni.style.display='none'; hi.style.display='none'; ph.style.display='flex'; }
+  _logoUrl = url || '';
+  try { localStorage.setItem('bb_logo', _logoUrl); } catch(e) {}
+  function show(el) {
+    if (!el) return;
+    if (el.getAttribute('src') === url && el.complete && el.naturalWidth) { el.style.display = 'block'; el.style.opacity = 1; return; }
+    el.style.opacity = 0;
+    el.onload = function() { el.style.display = 'block'; requestAnimationFrame(function(){ el.style.opacity = 1; }); };
+    el.src = url;
+  }
+  if (url) { show(ni); show(hi); }
+  else { if (ni) ni.style.display = 'none'; if (hi) hi.style.display = 'none'; }
+  refreshLogoPH();
 }
+try { var _c = localStorage.getItem('bb_logo'); if (_c) applyLogo(_c); } catch(e) {}
 function saveLogo() {
   if (!db) return;
   db.ref('bingo/landing/settings/logoUrl').set(document.getElementById('logo-url-input').value.trim());
