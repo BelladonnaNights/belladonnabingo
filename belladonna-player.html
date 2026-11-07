@@ -1892,6 +1892,22 @@ html, body {
   .np-right { display:none; }
 }
 .desk-only{display:none!important}
+
+/* ═══ Browser / narrow-window layout ═══ */
+.topbar{padding-left:20px!important;-webkit-app-region:no-drag!important}
+.pn-menu{display:none;background:none;border:1px solid var(--gold-border);border-radius:6px;color:var(--gold);font-size:16px;line-height:1;padding:5px 9px;cursor:pointer;flex-shrink:0}
+html.p-narrow .pn-menu{display:inline-block}
+html.p-narrow .app-body{position:relative}
+html.p-narrow .sidebar{position:absolute;left:0;top:0;bottom:0;z-index:400;width:min(264px,84vw);min-width:0;transform:translateX(-102%);transition:transform .25s ease;box-shadow:8px 0 30px rgba(0,0,0,.6)}
+html.p-narrow .sidebar.open{transform:none}
+html.p-narrow .sidebar-resize-handle{display:none}
+html.p-narrow .sidebar-backdrop.visible{display:block;position:absolute;inset:0;z-index:399;background:rgba(0,0,0,.55)}
+html.p-narrow .topbar{padding-right:10px!important;gap:8px!important;overflow:hidden}
+html.p-narrow .login-box{width:min(380px,92vw)}
+html.p-narrow .view{padding-left:12px!important;padding-right:12px!important}
+html.p-narrow .track-table-head,html.p-narrow .track-row{grid-template-columns:28px 1fr 56px 68px!important}
+html.p-narrow .t-num-col,html.p-narrow .t-album,html.p-narrow .t-bpm{display:none}
+html.p-narrow .np-right{display:none}
 </style>
 </head>
 <body>
@@ -2020,7 +2036,7 @@ html, body {
         </div>
         <span id="load-progress-eta" style="color:var(--text3);font-size:10px;"></span>
       </div>
-      <div class="topbar">
+      <div class="topbar"><button class="pn-menu" onclick="toggleSidebar()" title="Menu">☰</button>
         <div class="topbar-actions">
           <!-- Column visibility now lives in the "+" dropdown above the track list -->
           <!-- Free Play toggle lives here when playing -->
@@ -2823,6 +2839,7 @@ async function doLogin() {
   }
   if (!user) { err.style.display='block'; return; }
 
+  try{ localStorage.setItem('bella_last_user',JSON.stringify({username:user.username,name:user.name,role:user.role})); }catch(e){}
   S.user = user;
   S.isAdmin = user.role === 'admin';
   S.sessionStart = new Date();
@@ -7752,10 +7769,41 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
   setTimeout(async function(){
     try{ var h=await window.loadDirectoryHandle(); if(h){ window.__bbFolderName=h.name; var qb=document.getElementById('btn-quick-folder'); if(qb){ qb.style.opacity='1'; qb.style.cursor='pointer'; qb.disabled=false; } post({type:'bb-status',saved:h.name,library:(S.library||[]).length,matched:0,total:req?req.songs.length:0,missing:[],built:false,folder:h.name,needsFolder:!(S.library||[]).length}); } }catch(e){}
   },1500);
+
+  // ── sign-in: ride on the Gateway sign-in from the bingo page (no second login) ──
+  function gwUser(){
+    try{
+      var last=JSON.parse(localStorage.getItem('bella_last_user')||'null');
+      var best=null;
+      Object.keys(localStorage).forEach(function(k){
+        if(k.indexOf('gatewaySession_')!==0) return;
+        try{ var g=JSON.parse(localStorage.getItem(k)); if(g&&g.ts&&(Date.now()-g.ts)<6*3600*1000&&(!best||g.ts>best.ts)) best=g; }catch(e){}
+      });
+      if(!best) return null;
+      if(last&&last.username) return last;
+      var nm=best.name||best.displayName||(best.email?String(best.email).split('@')[0]:'')||'Host';
+      var un=String(best.email||best.uid||nm).toLowerCase().replace(/[^a-z0-9]/g,'_');
+      return {username:un,name:nm,role:'host'};
+    }catch(e){ return null; }
+  }
+  (function auto(n){
+    if(typeof S==='undefined'||typeof enterApp!=='function'){ if(n<50) return setTimeout(function(){auto(n+1);},200); return; }
+    if(S.user) return;
+    var u=gwUser(); if(!u) return;
+    if(typeof db==='undefined'||!db){ if(n<40) return setTimeout(function(){auto(n+1);},250); }
+    S.user=u; S.isAdmin=u.role==='admin'; S.sessionStart=new Date();
+    try{ enterApp(); }catch(e){ console.warn('auto sign-in failed',e); S.user=null; }
+  })(0);
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') post({type:'bb-esc'}); });
   post({type:'bb-ready'});
   document.documentElement.classList.add('bb-embed');
 })();
 
+</script>
+<script>
+(function(){function f(){document.documentElement.classList.toggle('p-narrow',window.innerWidth<720);}
+window.addEventListener('resize',f);f();
+document.addEventListener('click',function(e){if(document.documentElement.classList.contains('p-narrow')&&e.target.closest('.sidebar .nav-item,.sidebar .pl-item')&&typeof closeSidebar==='function')closeSidebar();});})();
 </script>
 </body>
 </html>
