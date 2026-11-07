@@ -237,6 +237,7 @@ html.light {
   --danger:       #c05050;
   --shadow-deep:  0 8px 40px rgba(0,0,0,.15);
 }
+html.light { --gold-shine:linear-gradient(135deg,#6b4f0e 0%,#8b6914 45%,#6b4f0e 70%,#7a5a10 100%); }
 html.light ::-webkit-scrollbar-thumb { background:rgba(139,105,20,.25); }
 html.light .now-playing-bar { background:rgba(237,233,224,.97); }
 html.light .topbar { background:rgba(237,233,224,.95); }
@@ -7773,17 +7774,20 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
   // ── sign-in: ride on the Gateway sign-in from the bingo page (no second login) ──
   function gwUser(){
     try{
-      var last=JSON.parse(localStorage.getItem('bella_last_user')||'null');
       var best=null;
       Object.keys(localStorage).forEach(function(k){
         if(k.indexOf('gatewaySession_')!==0) return;
         try{ var g=JSON.parse(localStorage.getItem(k)); if(g&&g.ts&&(Date.now()-g.ts)<6*3600*1000&&(!best||g.ts>best.ts)) best=g; }catch(e){}
       });
       if(!best) return null;
+      var prof=null; try{ prof=JSON.parse(localStorage.getItem('bella_gw_profile')||'null'); }catch(e){}
+      // a Gateway admin is the player's admin: sees/edits every playlist, with the same rules as the desktop player
+      if(prof&&prof.admin) return {username:'admin',name:prof.name||best.name||'Admin',role:'admin'};
+      var last=null; try{ last=JSON.parse(localStorage.getItem('bella_last_user')||'null'); }catch(e){}
       if(last&&last.username) return last;
-      var nm=best.name||best.displayName||(best.email?String(best.email).split('@')[0]:'')||'Host';
-      var un=String(best.email||best.uid||nm).toLowerCase().replace(/[^a-z0-9]/g,'_');
-      return {username:un,name:nm,role:'host'};
+      var nm=(prof&&prof.name)||best.name||best.displayName||(best.email?String(best.email).split('@')[0]:'')||'Host';
+      var un=String(nm).toLowerCase().replace(/[^a-z0-9]/g,'');
+      return {username:un||'host',name:nm,role:'host'};
     }catch(e){ return null; }
   }
   (function auto(n){
@@ -7795,6 +7799,20 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
     try{ enterApp(); }catch(e){ console.warn('auto sign-in failed',e); S.user=null; }
   })(0);
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') post({type:'bb-esc'}); });
+
+  // ── light / dark follows the bingo side ──
+  function setTheme(t){
+    var want=(t==='light'); var cur=document.documentElement.classList.contains('light');
+    if(want===cur) return;
+    document.documentElement.classList.toggle('light',want);
+    var b=document.getElementById('btn-theme'); if(b) b.textContent=want?'🌙':'☀';
+    try{ S.settings.lightMode=want; }catch(e){}
+  }
+  window.addEventListener('message',function(e){ if(e.origin===location.origin&&e.data&&e.data.type==='bb-theme') setTheme(e.data.theme==='light'?'light':'dark'); });
+  var _tt=window.toggleTheme;
+  if(_tt) window.toggleTheme=function(){ var r=_tt.apply(this,arguments); post({type:'bb-theme',theme:document.documentElement.classList.contains('light')?'light':'dark'}); return r; };
+  var _ea=window.enterApp;
+  if(_ea) window.enterApp=function(){ var r=_ea.apply(this,arguments); setTimeout(function(){ try{ var t=localStorage.getItem('bb_theme'); if(t) setTheme(t==='dark'?'dark':'light'); }catch(e){} },1500); return r; };
   post({type:'bb-ready'});
   document.documentElement.classList.add('bb-embed');
 })();
