@@ -199,10 +199,23 @@ html.dark{color-scheme:dark;
   --border:rgba(255,255,255,.09);--border2:rgba(255,255,255,.16);--border3:rgba(255,255,255,.28);
   --green-bg:#16301a;--green-border:#3f7a3a;--green-text:#b8e2a6;--green-sub:#8fcf7a;
   --gold-dim:rgba(201,168,76,.14);}
-html.dark .bingo-claim-banner,html.dark #player-link-indicator{background:#2b2410!important;color:#f2dfa0}
+html.dark .bingo-claim-banner,html.dark #player-link-indicator,html.dark #venue-link-bar{background:#2b2410!important;color:#f2dfa0}
+html.dark #venue-link-bar button{color:#f2dfa0!important}
 html.dark input,html.dark select,html.dark textarea{color:var(--text);background:var(--bg2)}
 html.dark #mp-pane{border-right-color:var(--gold-border2)}
 html{scrollbar-width:thin;scrollbar-color:#c9a84c transparent}
+
+/* pane header follows light / dark */
+html:not(.dark) #mp-pane{background:#f4f1eb;border-right-color:rgba(139,105,20,.5)}
+html:not(.dark) #mp-head{background:#ede9e2;border-bottom-color:rgba(139,105,20,.3)}
+html:not(.dark) #mp-head .mp-t,html:not(.dark) .mp-b{color:#7a5a10;border-color:rgba(139,105,20,.4)}
+html:not(.dark) .mp-b:hover{background:rgba(139,105,20,.12)}
+html:not(.dark) #mp-stat{background:#f4f1eb;color:#5a4e3c;border-bottom-color:rgba(139,105,20,.15)}
+html:not(.dark) #mp-stat b{color:#7a5a10}
+html:not(.dark) #mp-frame{background:#f4f1eb}
+* { scrollbar-width:thin; scrollbar-color:#c9a84c transparent; }
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#e2c068,#c9a84c);border-radius:6px}
 /* ═══ Media player slide-out (split screen) ═══ */
 :root{--mpw:46vw}
 body{transition:padding-left .28s cubic-bezier(.2,.8,.2,1)}
@@ -296,8 +309,9 @@ body.mp-open #mp-tab{display:none}
       <span style="font-size:18px">&#9835;</span>
       <span><strong>Media Player Linked</strong> &mdash; songs will auto-tick when played</span>
     </div>
-    <div id="venue-link-bar" style="margin-bottom:1.25rem;padding:10px 16px;background:rgba(201,168,76,.10);border:1.5px solid var(--gold);border-radius:var(--radius);font-family:var(--cinzel);font-size:11px;letter-spacing:.08em;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div id="venue-link-bar" style="margin-bottom:1.25rem;position:relative;color:#7a5500;padding:10px 16px;background:#fffbe6;border:1.5px solid var(--gold);border-radius:var(--radius);font-family:var(--cinzel);font-size:11px;letter-spacing:.08em;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-right:40px">
       <span id="venue-link-text"></span>
+      <button onclick="document.getElementById('venue-link-bar').style.display='none'" title="Close" aria-label="Close" style="position:absolute;top:6px;right:8px;background:none;border:none;color:#7a5500;font-size:16px;line-height:1;cursor:pointer;padding:4px 6px">✕</button>
       <select id="venue-link-select" onchange="linkToVenue(this.value)" style="display:none;font-family:inherit;font-size:12px;padding:6px 8px;border-radius:6px;max-width:100%"></select>
     </div>
     <div class="host-tabs">
@@ -911,10 +925,10 @@ function initVenueBar(){
   if(!bar)return;
   const id=venueNightId();
   if(id){
-    txt.innerHTML='<strong>\uD83D\uDCCD Venue QR linked</strong> \u2014 guests scanning the venue code join this game';
+    txt.innerHTML='<strong>Venue QR linked</strong> \u2014 guests scanning the venue code join this game';
     announceActive();return;
   }
-  txt.innerHTML='<strong>\uD83D\uDCCD Not linked to a venue</strong> \u2014 pick tonight\'s venue so its QR code opens THIS game:';
+  txt.innerHTML='<strong>Not linked to a venue</strong> \u2014 pick tonight\'s venue so its QR code opens THIS game:';
   sel.style.display='';sel.innerHTML='<option value="">Choose venue\u2026</option>';
   if(!db)return;
   db.ref('bingo/landing/venues').once('value').then(sn=>{
