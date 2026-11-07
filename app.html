@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
 <title>Music Bingo</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=EB+Garamond:ital,wght@0,400;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script>try{if(localStorage.getItem("bb_theme")==="dark")document.documentElement.classList.add("dark");}catch(e){}</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -190,6 +191,18 @@ body.narrow .nav-tabs{order:5;flex:1 1 100%;flex-wrap:wrap;overflow:visible}
 .mp-ico{vertical-align:-1px;margin-right:5px}
 #mp-head{padding:6px 8px}
 @media(max-width:420px){.mp-b{padding:4px 7px;font-size:9px}}
+
+/* ═══ Dark mode ═══ */
+html.dark{color-scheme:dark;
+  --bg:#17130f;--bg2:#0f0d0a;--bg3:#272019;
+  --text:#efe7d6;--text2:#b9ae98;--text3:#8a8068;
+  --border:rgba(255,255,255,.09);--border2:rgba(255,255,255,.16);--border3:rgba(255,255,255,.28);
+  --green-bg:#16301a;--green-border:#3f7a3a;--green-text:#b8e2a6;--green-sub:#8fcf7a;
+  --gold-dim:rgba(201,168,76,.14);}
+html.dark .bingo-claim-banner,html.dark #player-link-indicator{background:#2b2410!important;color:#f2dfa0}
+html.dark input,html.dark select,html.dark textarea{color:var(--text);background:var(--bg2)}
+html.dark #mp-pane{border-right-color:var(--gold-border2)}
+html{scrollbar-width:thin;scrollbar-color:#c9a84c transparent}
 /* ═══ Media player slide-out (split screen) ═══ */
 :root{--mpw:46vw}
 body{transition:padding-left .28s cubic-bezier(.2,.8,.2,1)}
@@ -226,6 +239,7 @@ body.mp-open #mp-tab{display:none}
   <div id="mp-head">
     <span class="mp-t">♪ Media Player</span>
     <button class="mp-b" id="mp-folder-btn" onclick="mpFolder()" title="Choose where the music is read from"><svg class="mp-ico" width="14" height="12" viewBox="0 0 24 20" aria-hidden="true"><path fill="#c9a84c" d="M2 3a2 2 0 012-2h6l2 3h8a2 2 0 012 2v11a2 2 0 01-2 2H4a2 2 0 01-2-2z"/></svg>Music folder</button>
+    <button class="mp-b" id="mp-theme-btn" onclick="mpToggleTheme()" title="Switch light / dark mode (both sides)">🌙 Dark</button>
     <button class="mp-b" onclick="mpReshuffle()" title="Pick a fresh random order">⇄ Reshuffle</button>
     <button class="mp-b" onclick="mpClose()" title="Close the player (music keeps playing)">✕</button>
   </div>
@@ -2230,6 +2244,7 @@ window.addEventListener('message',function(e){
   }
   else if(m.type==='bb-status'){
     mpLast=m;
+    try{if(localStorage.getItem('bb_theme'))mpPost({type:'bb-theme',theme:mpThemeNow()});}catch(e){}
     var btn=document.getElementById('mp-folder-btn');
     if(m.library){
       if(btn) btn.innerHTML=MP_ICO+esc2(m.folder?m.folder:'Music folder');
@@ -2255,6 +2270,17 @@ window.addEventListener('message',function(e){
 })();
 
 document.body.classList.add('mp-ready');
+
+function mpThemeNow(){return document.documentElement.classList.contains('dark')?'dark':'light';}
+function mpApplyTheme(t,fromPlayer){
+  document.documentElement.classList.toggle('dark',t==='dark');
+  try{localStorage.setItem('bb_theme',t);}catch(e){}
+  var b=document.getElementById('mp-theme-btn'); if(b) b.textContent=t==='dark'?'☀ Light':'🌙 Dark';
+  if(!fromPlayer) mpPost({type:'bb-theme',theme:t});
+}
+function mpToggleTheme(){mpApplyTheme(mpThemeNow()==='dark'?'light':'dark');}
+window.addEventListener('message',function(e){if(e.origin===location.origin&&e.data&&e.data.type==='bb-theme')mpApplyTheme(e.data.theme,true);});
+mpApplyTheme(mpThemeNow(),true);
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&document.fullscreenElement)document.exitFullscreen().catch(function(){});});
 window.addEventListener('message',function(e){if(e.origin===location.origin&&e.data&&e.data.type==='bb-esc'&&document.fullscreenElement)document.exitFullscreen().catch(function(){});});
 function mpNarrow(){var pw=document.body.classList.contains('mp-open')?document.getElementById('mp-pane').offsetWidth:0;document.body.classList.toggle('narrow',(window.innerWidth-pw)<640);}
