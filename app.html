@@ -34,11 +34,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg2);color:var(--
 .error-sub{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--text2);max-width:400px}
 
 /* NAV */
-.nav{background:var(--bg);border-bottom:1px solid var(--border2);padding:0 1.5rem;display:flex;align-items:center;position:sticky;top:0;z-index:100;height:60px}
+.nav{background:var(--bg);border-bottom:1px solid var(--border2);padding:0 1.5rem;display:flex;align-items:center;flex-wrap:wrap;row-gap:0;position:sticky;top:0;z-index:100;min-height:60px}
 .nav-brand{display:flex;align-items:center;gap:10px;margin-right:1.5rem;white-space:nowrap;text-decoration:none}
 .nav-brand-logo{height:32px;width:auto;object-fit:contain;display:none}
 .nav-brand-text{font-family:var(--cinzel);font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;background:var(--gold-shine);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
-.nav-tabs{display:flex;overflow-x:auto}
+.nav-tabs{display:flex;overflow-x:auto;max-width:100%;scrollbar-width:none}.nav-tabs::-webkit-scrollbar{display:none}
 .nav-tab{padding:14px 18px;font-size:12px;cursor:pointer;border:none;background:none;color:var(--text2);border-bottom:2px solid transparent;font-family:var(--cinzel);letter-spacing:.07em;text-transform:uppercase;transition:all .15s;white-space:nowrap}
 .nav-tab.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
 .nav-tab:hover:not(.active){color:var(--text)}
@@ -178,6 +178,18 @@ button{cursor:pointer;font-family:var(--font);font-size:13px}
   .nav-brand-text{font-size:11px}
 }
 /* print handled by printCards() function — opens a dedicated clean window */
+
+body.narrow .page{padding:1rem .75rem 3rem}
+body.narrow .nav{padding:4px .75rem}
+body.narrow .nav-brand{margin-right:.5rem}
+body.narrow .nav-brand-text{font-size:11px}
+body.narrow .nav-tab{padding:10px 11px;font-size:11px}
+body.narrow .song-grid,body.narrow .print-grid{grid-template-columns:1fr 1fr}
+body.narrow .cards-preview{grid-template-columns:1fr}
+body.narrow .nav-tabs{order:5;flex:1 1 100%;flex-wrap:wrap;overflow:visible}
+.mp-ico{vertical-align:-1px;margin-right:5px}
+#mp-head{padding:6px 8px}
+@media(max-width:420px){.mp-b{padding:4px 7px;font-size:9px}}
 /* ═══ Media player slide-out (split screen) ═══ */
 :root{--mpw:46vw}
 body{transition:padding-left .28s cubic-bezier(.2,.8,.2,1)}
@@ -213,9 +225,8 @@ body.mp-open #mp-tab{display:none}
 <aside id="mp-pane" aria-label="Media player">
   <div id="mp-head">
     <span class="mp-t">♪ Media Player</span>
-    <button class="mp-b" id="mp-folder-btn" onclick="mpFolder()" title="Choose where the music is read from">📂 Music folder</button>
+    <button class="mp-b" id="mp-folder-btn" onclick="mpFolder()" title="Choose where the music is read from"><svg class="mp-ico" width="14" height="12" viewBox="0 0 24 20" aria-hidden="true"><path fill="#c9a84c" d="M2 3a2 2 0 012-2h6l2 3h8a2 2 0 012 2v11a2 2 0 01-2 2H4a2 2 0 01-2-2z"/></svg>Music folder</button>
     <button class="mp-b" onclick="mpReshuffle()" title="Pick a fresh random order">⇄ Reshuffle</button>
-    <button class="mp-b" onclick="mpFullscreen()" id="mp-fs-btn" title="Fullscreen the whole split screen">⛶ Fullscreen</button>
     <button class="mp-b" onclick="mpClose()" title="Close the player (music keeps playing)">✕</button>
   </div>
   <div id="mp-stat">Starting the player…</div>
@@ -254,6 +265,7 @@ body.mp-open #mp-tab{display:none}
     <button class="nav-tab" id="tab-cards" onclick="showPage('cards')">Card Generator</button>
     <button class="nav-tab" id="tab-player" onclick="showPage('player')">Player Card</button>
     <a class="nav-tab" id="tab-tiebreaker" onclick="openTiebreaker()" style="text-decoration:none;cursor:pointer">Tie Breaker</a>
+    <a class="nav-tab" id="tab-fs" onclick="mpFullscreen()" title="Fullscreen the whole screen (Esc to leave)" style="text-decoration:none;cursor:pointer">⛶ Fullscreen</a>
   </div>
 </nav>
 
@@ -2160,6 +2172,8 @@ bootstrap();
 // ═══ MEDIA PLAYER SLIDE-OUT (replaces the old separate-tab player) ═══
 var MP_PLAYER_URL='belladonna-player.html';
 var mpReady=false, mpLast=null;
+var MP_ICO='<svg class="mp-ico" width="14" height="12" viewBox="0 0 24 20" aria-hidden="true"><path fill="#c9a84c" d="M2 3a2 2 0 012-2h6l2 3h8a2 2 0 012 2v11a2 2 0 01-2 2H4a2 2 0 01-2-2z"/></svg>';
+function esc2(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 function mpIdb(){return new Promise(function(res,rej){var r=indexedDB.open('bb-music-folder',1);r.onupgradeneeded=function(){r.result.createObjectStore('h');};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
 function mpGetDir(){return mpIdb().then(function(d){return new Promise(function(res){var q=d.transaction('h').objectStore('h').get('dir');q.onsuccess=function(){res(q.result||null);};q.onerror=function(){res(null);};});}).catch(function(){return null;});}
 function mpPutDir(h){return mpIdb().then(function(d){return new Promise(function(res){var t=d.transaction('h','readwrite');t.objectStore('h').put(h,'dir');t.oncomplete=function(){res(true);};t.onerror=function(){res(false);};});}).catch(function(){return false;});}
@@ -2191,7 +2205,7 @@ function mpFullscreen(){
   if(document.fullscreenElement){document.exitFullscreen().catch(function(){});return;}
   document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(function(){});
 }
-document.addEventListener('fullscreenchange',function(){var b=document.getElementById('mp-fs-btn');if(b)b.textContent=document.fullscreenElement?'⛶ Exit fullscreen':'⛶ Fullscreen';});
+document.addEventListener('fullscreenchange',function(){var b=document.getElementById('tab-fs');if(b)b.textContent=document.fullscreenElement?'⛶ Exit fullscreen':'⛶ Fullscreen';});
 function mpReshuffle(){mpPost({type:'bb-reshuffle'});}
 async function mpFolder(){
   var saved=await mpGetDir();
@@ -2218,12 +2232,12 @@ window.addEventListener('message',function(e){
     mpLast=m;
     var btn=document.getElementById('mp-folder-btn');
     if(m.library){
-      if(btn) btn.textContent='📂 '+(m.folder?m.folder:'Music folder');
+      if(btn) btn.innerHTML=MP_ICO+esc2(m.folder?m.folder:'Music folder');
       var s='<b>'+m.matched+'</b> of <b>'+m.total+'</b> songs found in your music · plays in shuffle';
       if(m.missing&&m.missing.length) s+='<details><summary>'+m.missing.length+' not found</summary>'+m.missing.map(function(x){return x.replace(/</g,'&lt;');}).join('<br>')+'</details>';
       mpSet(s);
     } else if(m.saved){
-      if(btn){btn.textContent='📂 Reconnect '+m.saved;btn.classList.add('warn');}
+      if(btn){btn.innerHTML=MP_ICO+'Reconnect '+esc2(m.saved);btn.classList.add('warn');}
       mpSet('Click <b>Reconnect '+m.saved.replace(/</g,'&lt;')+'</b> to let the player read your music again.');
     } else mpSet('Choose your music folder to begin.');
     if(m.library&&btn) btn.classList.remove('warn');
@@ -2241,6 +2255,11 @@ window.addEventListener('message',function(e){
 })();
 
 document.body.classList.add('mp-ready');
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&document.fullscreenElement)document.exitFullscreen().catch(function(){});});
+window.addEventListener('message',function(e){if(e.origin===location.origin&&e.data&&e.data.type==='bb-esc'&&document.fullscreenElement)document.exitFullscreen().catch(function(){});});
+function mpNarrow(){var pw=document.body.classList.contains('mp-open')?document.getElementById('mp-pane').offsetWidth:0;document.body.classList.toggle('narrow',(window.innerWidth-pw)<640);}
+window.addEventListener('resize',mpNarrow);new MutationObserver(mpNarrow).observe(document.body,{attributes:true,attributeFilter:['class']});
+setInterval(mpNarrow,400);mpNarrow();
 
 </script>
 </body>
