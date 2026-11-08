@@ -1899,6 +1899,10 @@ html, body {
 .topbar{padding-left:20px!important;-webkit-app-region:no-drag!important}
 .pn-menu{display:none;background:none;border:1px solid var(--gold-border);border-radius:6px;color:var(--gold);font-size:16px;line-height:1;padding:5px 9px;cursor:pointer;flex-shrink:0}
 html.p-narrow .pn-menu{display:inline-block}
+.pn-menu{display:inline-block}
+html.sb-collapsed:not(.p-narrow) .sidebar{display:none}
+.bb-only{display:none}
+html.bb-embed .bb-only{display:inline-block}
 html.p-narrow .app-body{position:relative}
 html.p-narrow .sidebar{position:absolute;left:0;top:0;bottom:0;z-index:400;width:min(264px,84vw);min-width:0;transform:translateX(-102%);transition:transform .25s ease;box-shadow:8px 0 30px rgba(0,0,0,.6)}
 html.p-narrow .sidebar.open{transform:none}
@@ -1915,6 +1919,8 @@ html.p-narrow .np-right{display:none}
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:linear-gradient(180deg,#e2c068,#c9a84c); border-radius:6px; }
 .toast, html.light .toast { background:#1d1a24 !important; color:#f5df90 !important; border-color:rgba(201,168,76,.55) !important; }
+#np-main-art{width:min(360px,38vh,62%)!important;height:auto!important;aspect-ratio:1/1;flex-shrink:1!important}
+#np-main-panel{padding:20px 16px!important;gap:14px!important}
 </style>
 </head>
 <body>
@@ -2043,7 +2049,7 @@ html.p-narrow .np-right{display:none}
         </div>
         <span id="load-progress-eta" style="color:var(--text3);font-size:10px;"></span>
       </div>
-      <div class="topbar"><button class="pn-menu" onclick="toggleSidebar()" title="Menu">☰</button>
+      <div class="topbar"><button class="pn-menu" onclick="toggleSidebar()" title="Show / hide the sidebar">☰</button>
         <div class="topbar-actions">
           <!-- Column visibility now lives in the "+" dropdown above the track list -->
           <!-- Free Play toggle lives here when playing -->
@@ -2056,6 +2062,7 @@ html.p-narrow .np-right{display:none}
             <button class="btn-sm" id="btn-mode-top" onclick="event.stopPropagation();toggleFadeMenu()">↔ Fade ▾</button>
             <div class="col-add-menu" id="fade-mode-menu" style="min-width:180px;right:0;left:auto;"></div>
           </div>
+          <button class="btn-sm bb-only" id="btn-bb-reshuffle" onclick="bbReshuffle()" title="Pick a fresh random order">⇄ Reshuffle</button>
           <button class="desk-only" onclick="minimizeWindow()" title="Minimize" style="background:none;border:none;color:var(--text3);font-size:14px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.5;transition:opacity .15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">—</button>
           <button class="desk-only" onclick="closeWindow()" title="Close" style="background:none;border:none;color:var(--text3);font-size:14px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;opacity:0.5;transition:all .15s;" onmouseover="this.style.opacity='1';this.style.color='#e05050'" onmouseout="this.style.opacity='0.5';this.style.color='var(--text3)'">✕</button>
         </div>
@@ -2916,6 +2923,7 @@ function enterApp() {
   loadPlaylists().then(() => startVaultSync());
   loadSettings();
   loadCuePoints();
+  loadMatchMap();
   loadLibraryMeta();
   if (S.isAdmin) loadAdminData();
   loadSidebarLogo();
@@ -2954,6 +2962,11 @@ function loadSidebarLogo() {
 
 // ═══════════════ SIDEBAR ═══════════════
 function toggleSidebar() {
+  if (!document.documentElement.classList.contains('p-narrow')) {
+    const c = document.documentElement.classList.toggle('sb-collapsed');
+    try { localStorage.setItem('bella_sb_collapsed', c ? '1' : '0'); } catch(e) {}
+    return;
+  }
   const sb = document.getElementById('sidebar');
   const bd = document.getElementById('sb-backdrop');
   const open = sb.classList.contains('open');
@@ -3001,6 +3014,7 @@ function plDbPath(pl) {
 }
 
 function plCanEdit(pl) {
+  if (pl.fromCategory) return false; // these come from the bingo admin — edit them there
   if (S.isAdmin) return true;
   if (pl.scope === 'personal' && pl.owner === S.user.username) return true;
   return false;
@@ -3182,7 +3196,14 @@ function importDesktopPlaylists() {
       renderSidePlaylists();
       if (S.library.length) S.playlists.forEach(syncPlaylistTracksFromLibrary);
       for (const pl of pls) { try { await savePL(pl); } catch(e) {} }
-      toast('Imported ' + pls.length + ' playlists', 4000);
+      // confirm they really reached Firebase (so hosts will see the admin ones)
+      let saved = 0, wanted = pls.filter(x => x.scope === 'admin-bingo' || x.scope === 'admin-belladonna').length;
+      try {
+        const [bs, ls] = await Promise.all([db.ref('player/admin_playlists/bingo').once('value'), db.ref('player/admin_playlists/belladonna').once('value')]);
+        saved = Object.keys(bs.val() || {}).length + Object.keys(ls.val() || {}).length;
+      } catch(e) {}
+      if (wanted && saved < wanted) toast('Imported ' + pls.length + ' — but Firebase would not save the admin ones (' + saved + ' of ' + wanted + ' synced). Your account may not be allowed to write them.', 9000);
+      else toast('Imported ' + pls.length + ' playlists' + (wanted ? ' — admin ones are now synced for every host' : ''), 6000);
     } catch(e) { toast('Could not read that file: ' + e.message, 5000); }
   };
   inp.click();
@@ -3819,8 +3840,75 @@ function isRowSelected(context, id) {
 // This keeps every playlist's track data in sync with the library by ID,
 // without changing how playlists are stored — just refreshing the fields
 // that come from the library before every render.
+// ── Remembered matches: song → file. Shared by every playlist, kept through refresh, saved to Firebase ──
+function mmKey(title, artist) { return _bn(title) + '|' + _bn(artist).replace(/^the/, ''); }
+let _mmDirty = {}, _mmTimer = null;
+function mmRecord(key, live) {
+  if (!key || key === '|' || !live || !live.id) return;
+  S.matchMap = S.matchMap || {};
+  const cur = S.matchMap[key];
+  if (cur && cur.id === live.id && cur.fn === live.filename) return;
+  S.matchMap[key] = { id: live.id, fn: live.filename };
+  _mmDirty[key] = S.matchMap[key];
+  try { localStorage.setItem('bella_matchmap', JSON.stringify(S.matchMap)); } catch(e) {}
+  clearTimeout(_mmTimer); _mmTimer = setTimeout(flushMatchMap, 1500);
+}
+function flushMatchMap() {
+  if (!db || !S.user || !Object.keys(_mmDirty).length) return;
+  const upd = {}; Object.keys(_mmDirty).forEach(k => { upd['player/users/' + S.user.username + '/matches/' + k] = _mmDirty[k]; });
+  _mmDirty = {};
+  db.ref().update(upd).catch(e => toast('⚠ Couldn\u2019t save your song matches to Firebase: ' + (e.code || e.message), 6000));
+}
+async function loadMatchMap() {
+  S.matchMap = S.matchMap || {};
+  try { Object.assign(S.matchMap, JSON.parse(localStorage.getItem('bella_matchmap') || '{}')); } catch(e) {}
+  if (db && S.user) {
+    try {
+      const snap = await db.ref('player/users/' + S.user.username + '/matches').once('value');
+      const remote = snap.val() || {};
+      Object.assign(S.matchMap, remote);
+      // anything only known locally gets pushed up
+      Object.keys(S.matchMap).forEach(k => { if (!remote[k]) _mmDirty[k] = S.matchMap[k]; });
+      flushMatchMap();
+    } catch(e) { console.warn('matches load', e.message); }
+  }
+  if (S.library && S.library.length) S.playlists.forEach(syncPlaylistTracksFromLibrary);
+  if (S.currentPL && typeof renderTrackList === 'function' && document.getElementById('track-list-wrap')) { try { renderTrackList(); } catch(e) {} }
+}
+
+function _bn(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\(.*?\)|\[.*?\]/g,' ').replace(/\b(feat|ft|featuring)\b.*$/,' ').replace(/&/g,' and ').replace(/[^a-z0-9]+/g,''); }
+function matchCategoryPlaylist(pl) {
+  const lib = S.library || [];
+  if (!lib.length || pl._matchSig === lib.length) return;
+  pl._matchSig = lib.length;
+  const idx = lib.map(t => ({ t, tt:_bn(t.title), ta:_bn(t.artist).replace(/^the/,''), fn:_bn((t.filename||'').replace(/\.[^.]+$/,'')) }));
+  const used = {};
+  pl.tracks.forEach(pt => { if (pt._matched) used[pt.id] = 1; });
+  pl.tracks.forEach(pt => {
+    if (pt._matched) return;
+    const st = _bn(pt._bingo.title), sa = _bn(pt._bingo.artist).replace(/^the/,'');
+    if (!st) return;
+    let hit = null, i, c;
+    for (i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&c.tt===st&&sa&&c.ta&&(c.ta===sa||c.ta.indexOf(sa)>-1||sa.indexOf(c.ta)>-1)) hit=c; }
+    for (i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&c.fn.indexOf(st)>-1&&(!sa||c.fn.indexOf(sa)>-1)) hit=c; }
+    for (i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&c.tt===st) hit=c; }
+    for (i=0;i<idx.length&&!hit&&st.length>=6;i++){ c=idx[i]; if(!used[c.t.id]&&c.fn.indexOf(st)>-1) hit=c; }
+    if (!hit) return;
+    used[hit.t.id] = 1;
+    pt.id = hit.t.id; pt.filename = hit.t.filename; pt._matched = true;
+    if (hit.t.duration) pt.duration = hit.t.duration;
+    if (hit.t.artUrl) pt.artUrl = hit.t.artUrl;
+    // the list's [m:ss] is the start point unless a bingo cue was already saved for this song
+    const sec = (() => { const m = /^(\d+):(\d{2})$/.exec(pt._ts||''); return m ? (+m[1])*60 + (+m[2]) : 0; })();
+    if (sec && !(S.cueOverrides[pt.id] && S.cueOverrides[pt.id].bingo) && !(S.cuePoints[pt.id] && S.cuePoints[pt.id].bingo)) {
+      S.cuePoints[pt.id] = Object.assign({}, S.cuePoints[pt.id] || {}, { bingo: sec });
+    }
+  });
+}
+
 function syncPlaylistTracksFromLibrary(pl) {
   if (!pl?.tracks?.length) return;
+  if (pl.fromCategory) { matchCategoryPlaylist(pl); return; }
 
   // Three lookup tiers — handles tracks added under any historical ID scheme:
   // 1. Current fingerprint (name+size hash) — the normal case
@@ -3835,10 +3923,14 @@ function syncPlaylistTracksFromLibrary(pl) {
   );
 
   pl.tracks.forEach(pt => {
-    const live = byId.get(pt.id)
+    const mk = mmKey(pt.title, pt.artist);
+    let live = byId.get(pt.id)
       || byFilename.get(pt.filename)
       || byTitleArtist.get(norm(pt.title) + '|' + norm(pt.artist));
+    if (!live && S.matchMap && S.matchMap[mk]) { const m = S.matchMap[mk]; live = byId.get(m.id) || byFilename.get(m.fn) || null; }
     if (!live) return;
+    mmRecord(mk, live);
+    if (!live._needsEnrich) mmRecord(mmKey(live.title, live.artist), live);
     // Update id + filename to current values so fileHandles lookup always works
     pt.id       = live.id;
     pt.filename = live.filename;
@@ -3965,7 +4057,7 @@ function renderTrackList() {
 
 function renderRow(t, displayIdx, origIdx) {
   const i = origIdx !== undefined ? origIdx : displayIdx;
-  const playing = S.trackIdx===i;
+  const playing = S.trackIdx===i && !!S.track && (t.id===S.track.id || (_bn(t.title)===_bn(S.track.title) && _bn(t.artist)===_bn(S.track.artist)));
   const cues = getEffectiveCue(t.id);
   const hasOverride = !!S.cueOverrides[t.id];
   const hasBingo = !!cues.bingo;
@@ -5715,7 +5807,7 @@ let jukeboxWin = null;
 const JUKEBOX_HTML = "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<title>Belladonna \u2014 Now Playing</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,400;1,400&display=swap\" rel=\"stylesheet\">\n<style>\n  * { margin:0; padding:0; box-sizing:border-box; }\n  html, body {\n    width:100%; height:100%;\n    background:#000; color:#fff;\n    font-family:'Crimson Pro',serif;\n    overflow:hidden; user-select:none;\n  }\n\n  #jw-bg {\n    position:fixed; inset:0;\n    transition:background 2s ease;\n    z-index:0;\n  }\n\n  #jw-wrap {\n    position:relative; z-index:2;\n    width:100%; height:100%;\n    display:flex;\n    flex-direction:column;\n    align-items:center;\n    justify-content:center;\n    padding:24px 28px;\n    gap:0;\n  }\n\n  .jw-brand {\n    position:fixed; top:14px; left:0; right:0;\n    text-align:center;\n    font-family:'Cinzel Decorative',serif;\n    font-size:9px; letter-spacing:0.25em;\n    color:rgba(255,255,255,0.18);\n    z-index:3;\n  }\n\n  #jw-art {\n    width:min(60vw, 60vh);\n    height:min(60vw, 60vh);\n    border-radius:16px;\n    overflow:hidden;\n    box-shadow:0 20px 80px rgba(0,0,0,0.9), 0 0 40px rgba(201,168,76,0.12);\n    background:#111;\n    flex-shrink:0;\n    margin-bottom:clamp(16px, 3vh, 32px);\n  }\n  #jw-art img { width:100%; height:100%; object-fit:cover; display:block; }\n  .jw-art-ph {\n    width:100%; height:100%;\n    display:flex; align-items:center; justify-content:center;\n    font-size:clamp(48px, 12vw, 96px);\n    opacity:0.12;\n  }\n\n  #jw-title {\n    font-family:'Cinzel',serif;\n    font-size:clamp(16px, 4vw, 32px);\n    text-align:center;\n    padding:0 16px;\n    max-width:100%;\n    overflow:hidden;\n    text-overflow:ellipsis;\n    white-space:nowrap;\n    text-shadow:0 2px 24px rgba(0,0,0,0.9);\n    letter-spacing:0.03em;\n    margin-bottom:8px;\n  }\n\n  #jw-artist {\n    font-size:clamp(13px, 2.5vw, 20px);\n    color:rgba(255,255,255,0.5);\n    text-align:center;\n    font-style:italic;\n    max-width:100%;\n    overflow:hidden;\n    text-overflow:ellipsis;\n    white-space:nowrap;\n    padding:0 16px;\n  }\n\n  #jw-next {\n    position:fixed; bottom:20px; left:0; right:0;\n    text-align:center; z-index:3;\n    display:none;\n  }\n  .jw-next-label {\n    font-family:'Cinzel',serif;\n    font-size:8px; letter-spacing:0.3em;\n    text-transform:uppercase;\n    color:rgba(255,255,255,0.22);\n    margin-bottom:3px;\n  }\n  .jw-next-val {\n    font-size:12px;\n    color:rgba(255,255,255,0.38);\n    font-style:italic;\n  }\n\n  /* Controls \u2014 top right corner */\n  #jw-controls {\n    position:fixed; top:10px; right:12px;\n    display:flex; gap:6px; align-items:center;\n    z-index:10;\n  }\n  .jw-btn {\n    background:none;\n    border:1px solid rgba(255,255,255,0.15);\n    color:rgba(255,255,255,0.35);\n    font-size:13px;\n    padding:3px 8px;\n    border-radius:5px;\n    cursor:pointer;\n    transition:all .2s;\n    font-family:inherit;\n    line-height:1.4;\n  }\n  .jw-btn:hover {\n    background:rgba(255,255,255,0.08);\n    color:rgba(255,255,255,0.75);\n    border-color:rgba(255,255,255,0.3);\n  }\n  .jw-btn.active {\n    border-color:rgba(201,168,76,0.5);\n    color:rgba(201,168,76,0.8);\n  }\n  /* Playlist background image/video layer */\n  #jw-pl-bg {\n    position:fixed; inset:0; z-index:1;\n    background-size:cover; background-position:center;\n    transition:opacity 1s ease;\n    opacity:0;\n  }\n  #jw-pl-bg.visible { opacity:1; }\n  #jw-pl-bg video {\n    width:100%; height:100%; object-fit:cover;\n    position:absolute; inset:0;\n  }\n\n  /* Playback controls */\n  #jw-transport {\n    position:fixed; bottom:28px; left:0; right:0;\n    display:flex; align-items:center; justify-content:center;\n    gap:20px; z-index:4;\n    transition:opacity .3s;\n  }\n  #jw-transport.hidden { opacity:0; pointer-events:none; }\n  .jw-ctrl {\n    background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.18);\n    color:rgba(255,255,255,0.7); font-size:16px;\n    width:40px; height:40px; border-radius:50%;\n    cursor:pointer; display:flex; align-items:center; justify-content:center;\n    transition:all .2s; backdrop-filter:blur(4px);\n  }\n  .jw-ctrl:hover { background:rgba(201,168,76,0.25); border-color:rgba(201,168,76,0.5); color:#fff; }\n  .jw-ctrl.play { width:52px; height:52px; font-size:20px; border-color:rgba(201,168,76,0.4); }\n</style>\n<script>window.jukeboxAPI={onUpdate:function(cb){window.addEventListener('message',function(e){if(e.data&&e.data.__jb)cb(e.data.d);});},sendCommand:function(c){try{window.opener.postMessage({__jbcmd:c},location.origin);}catch(x){}}};<\/script>\n</head>\n<body>\n  <div id=\"jw-bg\"></div>\n  <div id=\"jw-pl-bg\"></div>\n\n  <div id=\"jw-controls\">\n    <select id=\"jw-bg-select\" onchange=\"setJwBg(this.value)\" title=\"Choose background\" style=\"display:none;background:rgba(0,0,0,0.6);border:1px solid rgba(201,168,76,0.3);color:rgba(255,255,255,0.7);font-size:11px;padding:3px 6px;border-radius:5px;cursor:pointer;max-width:160px;outline:none;\">\n      <option value=\"\">\u2014 No BG \u2014</option>\n    </select>\n    <button class=\"jw-btn active\" id=\"jw-bg-btn\" onclick=\"togglePlBg()\" title=\"Toggle playlist background\">BG</button>\n    <button class=\"jw-btn\" id=\"jw-fs-btn\" onclick=\"toggleFullscreen()\" title=\"Toggle fullscreen\">\u26f6</button>\n    <button class=\"jw-btn\" onclick=\"window.close()\" title=\"Close\" style=\"border-color:rgba(255,255,255,0.1);\" onmouseover=\"this.style.color='#e05050';this.style.borderColor='rgba(220,80,80,0.4)'\" onmouseout=\"this.style.color='rgba(255,255,255,0.35)';this.style.borderColor='rgba(255,255,255,0.1)'\">\u2715</button>\n  </div>\n\n  <div class=\"jw-brand\">Belladonna Audio Alchemies</div>\n\n  <div id=\"jw-wrap\">\n    <div id=\"jw-art\"><div class=\"jw-art-ph\">\ud83d\udc80</div></div>\n    <div id=\"jw-title\">Nothing Playing</div>\n    <div id=\"jw-artist\">Belladonna Audio</div>\n  </div>\n\n  <div id=\"jw-next\">\n    <div class=\"jw-next-label\">Up Next</div>\n    <div class=\"jw-next-val\" id=\"jw-next-val\"></div>\n  </div>\n\n  <div id=\"jw-transport\">\n    <div class=\"jw-ctrl\" onclick=\"jwSend('prev')\" title=\"Previous\">\u23ee</div>\n    <div class=\"jw-ctrl play\" id=\"jw-play-btn\" onclick=\"jwSend('playpause')\" title=\"Play/Pause\">\u23f8</div>\n    <div class=\"jw-ctrl\" onclick=\"jwSend('next')\" title=\"Next\">\u23ed</div>\n  </div>\n\n<script>\n  let _plBgOn = true;\n  let _currentBg = '';\n\n  function togglePlBg() {\n    _plBgOn = !_plBgOn;\n    const plBg = document.getElementById('jw-pl-bg');\n    const btn  = document.getElementById('jw-bg-btn');\n    if (plBg) plBg.classList.toggle('visible', _plBgOn && !!plBg.dataset.url);\n    if (btn)  btn.classList.toggle('active', _plBgOn);\n  }\n\n  function setJwBg(url) {\n    _currentBg = url;\n    const plBg = document.getElementById('jw-pl-bg');\n    if (!plBg) return;\n    plBg.dataset.url = url;\n    const isVid = /\\.(mp4|webm|mov|ogv)(\\?.*)?$/i.test(url);\n    if (url) {\n      if (isVid) { plBg.style.backgroundImage=''; plBg.innerHTML='<video src=\"'+url+'\" autoplay loop muted playsinline></video>'; }\n      else { plBg.innerHTML=''; plBg.style.backgroundImage='url('+url+')'; }\n      if (_plBgOn) plBg.classList.add('visible');\n    } else {\n      plBg.innerHTML=''; plBg.style.backgroundImage=''; plBg.classList.remove('visible');\n    }\n  }\n\n  function toggleFullscreen() {\n    const btn = document.getElementById('jw-fs-btn');\n    if (!document.fullscreenElement) {\n      document.documentElement.requestFullscreen()\n        .then(() => { if(btn) btn.textContent = '\u22a0'; })\n        .catch(() => {});\n    } else {\n      document.exitFullscreen()\n        .then(() => { if(btn) btn.textContent = '\u26f6'; })\n        .catch(() => {});\n    }\n  }\n\n  document.addEventListener('fullscreenchange', () => {\n    const btn = document.getElementById('jw-fs-btn');\n    if (btn) btn.textContent = document.fullscreenElement ? '\u22a0' : '\u26f6';\n  });\n\n  document.addEventListener('dblclick', (e) => {\n    if (e.target.closest('.jw-btn') || e.target.closest('.jw-ctrl')) return;\n    toggleFullscreen();\n  });\n\n  // Send commands back to main player via IPC\n  function jwSend(cmd) {\n    if (window.jukeboxAPI?.sendCommand) window.jukeboxAPI.sendCommand(cmd);\n  }\n\n  function updateDisplay(data) {\n    document.getElementById('jw-title').textContent  = data.title  || 'Nothing Playing';\n    document.getElementById('jw-artist').textContent = data.artist || '';\n\n    // Populate bg library selector if library changed\n    const sel = document.getElementById('jw-bg-select');\n    if (sel && data.bgLibrary) {\n      const currentVal = sel.value;\n      sel.innerHTML = '<option value=\"\">\u2014 No BG \u2014</option>' +\n        (data.bgLibrary||[]).map(item =>\n          '<option value=\"'+item.url.replace(/\"/g,'&quot;')+'\">'+item.label.replace(/</g,'&lt;')+'</option>'\n        ).join('');\n      sel.value = data.jukeboxBg || currentVal || '';\n      sel.style.display = data.bgLibrary?.length ? '' : 'none';\n    }\n\n    // Show/hide transport controls\n    const transport = document.getElementById('jw-transport');\n    if (transport) transport.classList.toggle('hidden', data.showControls === false);\n\n    // Play/pause button state\n    const playBtn = document.getElementById('jw-play-btn');\n    if (playBtn) playBtn.textContent = data.isPlaying === false ? '\u25b6' : '\u23f8';\n\n    const artEl = document.getElementById('jw-art');\n    artEl.innerHTML = data.artUrl\n      ? '<img src=\"' + data.artUrl + '\" crossorigin=\"anonymous\" id=\"jw-art-img\">'\n      : '<div class=\"jw-art-ph\">\ud83d\udc80</div>';\n\n    // Dynamic ambient background from album art colour\n    if (data.artUrl) {\n      const img = new Image();\n      img.crossOrigin = 'anonymous';\n      img.onload = () => {\n        try {\n          const c = document.createElement('canvas');\n          c.width = c.height = 1;\n          const ctx = c.getContext('2d');\n          ctx.drawImage(img, 0, 0, 1, 1);\n          const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;\n          document.getElementById('jw-bg').style.background =\n            'radial-gradient(ellipse at center, rgba(' + r + ',' + g + ',' + b + ',0.45) 0%, #000 68%)';\n        } catch(e) {}\n      };\n      img.src = data.artUrl;\n    } else {\n      document.getElementById('jw-bg').style.background = '';\n    }\n\n    const nextEl = document.getElementById('jw-next');\n    if (data.nextTitle) {\n      nextEl.style.display = 'block';\n      document.getElementById('jw-next-val').textContent =\n        data.nextTitle + (data.nextArtist ? ' \u2014 ' + data.nextArtist : '');\n    } else {\n      nextEl.style.display = 'none';\n    }\n\n    // Playlist background \u2014 use setJwBg for consistent image/video handling\n    if (data.jukeboxBg !== _currentBg) {\n      setJwBg(data.jukeboxBg || '');\n    }\n  }\n\n  // Receive updates from the main player via IPC\n  if (window.jukeboxAPI) {\n    window.jukeboxAPI.onUpdate((data) => updateDisplay(data));\n  }\n<\/script>\n</body>\n</html>\n";
 function toggleJukebox() {
   if (jukeboxWin && !jukeboxWin.closed) { jukeboxWin.focus(); return; }
-  const jbUrl = URL.createObjectURL(new Blob([JUKEBOX_HTML], { type: 'text/html' }));
+  const jbUrl = URL.createObjectURL(new Blob([JUKEBOX_HTML.replace('</head>', '<style>#jw-next{display:none!important}</style></head>')], { type: 'text/html' }));
   jukeboxWin = window.open(jbUrl, 'belladonna_jukebox', 'width=480,height=580,left=' + (window.screenX + window.outerWidth + 10) + ',top=' + window.screenY);
   if (!jukeboxWin) { toast('Allow pop-ups to open the Jukebox Display'); return; }
   setTimeout(() => updateJukebox(S.track), 700);
@@ -5744,8 +5836,8 @@ function updateJukeboxWindow(t) {
       artUrl: t ? (t.artUrl||null) : null,
       jukeboxBg: S.currentPL?.jukeboxBg || null,
       isPlaying: S.isPlaying,
-      nextTitle: nextT ? (nextT.title||nextT.filename||'') : '',
-      nextArtist: nextT ? (nextT.artist||'') : ''
+      nextTitle: '',
+      nextArtist: ''
     }}, location.origin);
   } catch(e) {}
 }
@@ -7648,13 +7740,15 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
     var idx=lib.map(function(t){ return {t:t,tt:nz(t.title),ta:na(t.artist),fn:nz((t.filename||'').replace(/\.[^.]+$/,''))}; });
     req.songs.forEach(function(s){
       var st=nz(s.title), sa=na(s.artist), hit=null, i, c;
+      var mm=(S.matchMap||{})[mmKey(s.title,s.artist)];
+      if(mm){ for(i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&(c.t.id===mm.id||c.t.filename===mm.fn)) hit=c; } }
       if(st){
         for(i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&c.tt===st&&sa&&(c.ta===sa||c.ta.indexOf(sa)>-1||sa.indexOf(c.ta)>-1)&&c.ta) hit=c; }
         for(i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&c.fn.indexOf(st)>-1&&(!sa||c.fn.indexOf(sa)>-1)) hit=c; }
         for(i=0;i<idx.length&&!hit;i++){ c=idx[i]; if(!used[c.t.id]&&c.tt===st) hit=c; }
         for(i=0;i<idx.length&&!hit&&st.length>=6;i++){ c=idx[i]; if(!used[c.t.id]&&c.fn.indexOf(st)>-1) hit=c; }
       }
-      if(hit){ used[hit.t.id]=1; found.push({track:hit.t,song:s}); } else missing.push(s.title+(s.artist?' – '+s.artist:''));
+      if(hit){ used[hit.t.id]=1; found.push({track:hit.t,song:s}); try{ mmRecord(mmKey(s.title,s.artist),hit.t); }catch(e){} } else missing.push(s.title+(s.artist?' – '+s.artist:''));
     });
     return {found:found,missing:missing};
   }
@@ -7766,7 +7860,7 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
   if(_ea) window.enterApp=function(){ var r=_ea.apply(this,arguments); setTimeout(function(){ try{ var t=localStorage.getItem('bb_theme'); if(t) setTheme(t==='dark'?'dark':'light'); }catch(e){} },1500); return r; };
 
   // ── lazy loading: list the folder, but read a song's tags only when it is about to play ──
-  window.enrichTracksInBackground=function(ids){ S._lazyQueue=ids||[]; var el=document.getElementById('lib-count'); if(el) el.textContent=(S.library||[]).length+' tracks · tags read as songs play'; };
+  // tags are read once, then remembered on this computer — later loads are instant
   var _sync=window.syncPlaylistTracksFromLibrary;
   window.syncPlaylistTracksFromLibrary=function(pl){
     if(!pl||!pl.tracks||!pl.tracks.length) return;
@@ -7813,12 +7907,14 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
     }catch(e){}
     return _pa.apply(this,arguments);
   };
+  window.bbReshuffle=function(){ if(req) build(true); else if(typeof toggleShuffle==='function') toggleShuffle(); };
   post({type:'bb-ready'});
   document.documentElement.classList.add('bb-embed');
 })();
 
 </script>
 <script>
+try{ if(localStorage.getItem('bella_sb_collapsed')==='1') document.documentElement.classList.add('sb-collapsed'); }catch(e){}
 (function(){function f(){document.documentElement.classList.toggle('p-narrow',window.innerWidth<720);}
 window.addEventListener('resize',f);f();
 document.addEventListener('click',function(e){if(document.documentElement.classList.contains('p-narrow')&&e.target.closest('.sidebar .nav-item,.sidebar .pl-item')&&typeof closeSidebar==='function')closeSidebar();});})();
