@@ -1914,6 +1914,7 @@ html.p-narrow .np-right{display:none}
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:linear-gradient(180deg,#e2c068,#c9a84c); border-radius:6px; }
+.toast, html.light .toast { background:#1d1a24 !important; color:#f5df90 !important; border-color:rgba(201,168,76,.55) !important; }
 </style>
 </head>
 <body>
@@ -3041,6 +3042,7 @@ async function loadPlaylists() {
       const fromShared = Object.entries(sharedSnap.val() || {}).map(([id,p])=>({id,...p,scope:'shared'}));
       const fromMine   = Object.entries(mineSnap.val()   || {}).map(([id,p])=>({id,...p,scope:'personal',owner:S.user.username}));
       merged = [...fromBingo, ...fromBella, ...fromShared, ...fromMine];
+      S._plDiag = { bingo:fromBingo.length, bella:fromBella.length, shared:fromShared.length, mine:fromMine.length, user:S.user.username };
 
       // Sort by saved `order` field — this was being written on every
       // sidebar drag-reorder but never actually read back, so the order
@@ -3093,7 +3095,7 @@ async function loadPlaylists() {
           if (cached?.artUrl) t.artUrl = cached.artUrl;
         });
       });
-    } catch(e){ console.warn('loadPlaylists Firebase error:', e.message); toast('⚠ Couldn\u2019t read playlists: ' + (e.code || e.message), 6000); }
+    } catch(e){ console.warn('loadPlaylists Firebase error:', e.message); toast('⚠ Couldn\u2019t read playlists: ' + (e.code || e.message), 6000); S._plDiag = { error: (e.code || e.message), user: S.user && S.user.username }; }
   }
 
   if (!merged.length && Object.keys(localBackup).length) {
@@ -3166,10 +3168,34 @@ function renderPLItem(p, i) {
   '</div>';
 }
 
+// Bring over playlists saved by the desktop app (belladonna-player-data.json)
+function importDesktopPlaylists() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      let pls = (d.offlineCache && d.offlineCache.playlists) || d.playlists || (Array.isArray(d) ? d : null);
+      if (!pls || !pls.length) { toast('No playlists found in that file', 5000); return; }
+      pls.forEach((p, i) => { if (!p.scope) p.scope = 'personal'; if (p.scope === 'personal' && !p.owner) p.owner = S.user.username; if (p.order == null) p.order = i; });
+      S.playlists = pls;
+      renderSidePlaylists();
+      if (S.library.length) S.playlists.forEach(syncPlaylistTracksFromLibrary);
+      for (const pl of pls) { try { await savePL(pl); } catch(e) {} }
+      toast('Imported ' + pls.length + ' playlists', 4000);
+    } catch(e) { toast('Could not read that file: ' + e.message, 5000); }
+  };
+  inp.click();
+}
+
 function renderSidePlaylists() {
   const el = document.getElementById('s-playlists');
   if (!S.playlists.length) {
-    el.innerHTML='<div style="color:var(--text-ghost);font-size:12px;padding:6px 12px;font-style:italic;">No playlists yet</div>';
+    const dg = S._plDiag;
+    const dgTxt = !dg ? '' : dg.error ? ('Database said: ' + esc(String(dg.error))) : ('Looked in Bingo (' + dg.bingo + '), Belladonna (' + dg.bella + '), Shared (' + dg.shared + ') and “' + esc(dg.user) + '” (' + dg.mine + ') — nothing found.');
+    el.innerHTML='<div style="color:var(--text-ghost);font-size:12px;padding:6px 12px;font-style:italic;">No playlists yet</div>' +
+      (dgTxt ? '<div style="color:var(--text3);font-size:10.5px;line-height:1.4;padding:0 12px 6px;">' + dgTxt + '</div>' : '') +
+      '<div style="padding:0 12px 8px;"><button class="btn-sm" onclick="importDesktopPlaylists()" style="width:100%;">Import from desktop app file</button></div>';
     return;
   }
 
@@ -7643,7 +7669,7 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
       var sec=secs(f.song.ts);
       if(sec&&!(c&&c.bingo)){ S.cuePoints[f.track.id]=Object.assign({},S.cuePoints[f.track.id]||{},{bingo:sec}); }
     });
-    var tracks=shuffle(r.found.map(function(f){ return Object.assign({},f.track); }));
+    var tracks=shuffle(r.found.map(function(f){ return Object.assign({},f.track,{_bingo:{title:f.song.title,artist:f.song.artist}}); }));
     S.currentPL={id:'__shuffle__',name:'🎱 '+(req.title||'Bingo'),type:'bingo',tracks:tracks};
     S.shuffle=true; S.shuffledIndices=null; S.trackIdx=-1; S.track=null;
     built=true; window.__bbMissing=r.missing; window.__bbMatched=tracks.length;
@@ -7678,6 +7704,7 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
   // tell the bingo side what is playing, instantly
   var origPing=window.pingBingoApp;
   window.pingBingoApp=function(t){
+    if(t&&t._bingo){ t=Object.assign({},t,{title:t._bingo.title,artist:t._bingo.artist}); arguments[0]=t; }
     try{ post({type:'bb-now',title:(window.normForBingo?normForBingo(t.title||t.filename||''):(t.title||'')),artist:(window.normArtistForBingo?normArtistForBingo(t.artist||''):(t.artist||''))}); }catch(e){}
     if(origPing) return origPing.apply(this,arguments);
   };
@@ -7737,6 +7764,55 @@ if (!db) setTimeout(() => toast('Firebase not configured — sync disabled', 500
   if(_tt) window.toggleTheme=function(){ var r=_tt.apply(this,arguments); post({type:'bb-theme',theme:document.documentElement.classList.contains('light')?'light':'dark'}); return r; };
   var _ea=window.enterApp;
   if(_ea) window.enterApp=function(){ var r=_ea.apply(this,arguments); setTimeout(function(){ try{ var t=localStorage.getItem('bb_theme'); if(t) setTheme(t==='dark'?'dark':'light'); }catch(e){} },1500); return r; };
+
+  // ── lazy loading: list the folder, but read a song's tags only when it is about to play ──
+  window.enrichTracksInBackground=function(ids){ S._lazyQueue=ids||[]; var el=document.getElementById('lib-count'); if(el) el.textContent=(S.library||[]).length+' tracks · tags read as songs play'; };
+  var _sync=window.syncPlaylistTracksFromLibrary;
+  window.syncPlaylistTracksFromLibrary=function(pl){
+    if(!pl||!pl.tracks||!pl.tracks.length) return;
+    var lazy=(S.library||[]).filter(function(t){return t._needsEnrich;});
+    if(!lazy.length) return _sync.apply(this,arguments);
+    // only trust library entries whose tags have really been read; for the rest just keep ids/filenames current
+    var saved=lazy.map(function(t){return [t,t.title,t.artist,t.album,t.bpm,t.duration];});
+    var hold=new Map(); pl.tracks.forEach(function(pt){ hold.set(pt,{title:pt.title,artist:pt.artist,album:pt.album,bpm:pt.bpm,duration:pt.duration,artUrl:pt.artUrl}); });
+    _sync.apply(this,arguments);
+    pl.tracks.forEach(function(pt){
+      var live=(S.library||[]).find(function(t){return t.id===pt.id;});
+      if(live&&live._needsEnrich){ var h=hold.get(pt); if(h){ pt.title=h.title||pt.title; pt.artist=h.artist||pt.artist; pt.album=h.album; pt.bpm=h.bpm; pt.duration=h.duration; if(h.artUrl) pt.artUrl=h.artUrl; } }
+    });
+  };
+  async function lazyEnrich(t){
+    try{
+      if(!t) return;
+      var lib=(S.library||[]).find(function(x){return x.id===t.id;});
+      if(!lib){ return; }
+      if(lib._needsEnrich){
+        if(!lib._enriching){
+          lib._enriching=(async function(){
+            var h=S.fileHandles[lib.id]; if(!h||!h._electronPath) return;
+            var r=await window.electronAPI.readFileHeader(h._electronPath,262144); if(!r||!r.ok) return;
+            var bytes=new Uint8Array(r.bytes);
+            var syn={arrayBuffer:function(){return Promise.resolve(bytes.buffer);},_blob:new Blob([bytes])};
+            var en=await Promise.race([enrichTrackMetadata(syn,lib),new Promise(function(res){setTimeout(function(){res(null);},8000);})]);
+            if(en){ Object.assign(lib,en,{_needsEnrich:false});
+              window.electronAPI.setLibraryCacheEntries({[lib.id]:{title:lib.title,artist:lib.artist,album:lib.album,duration:lib.duration,bpm:lib.bpm,artUrl:lib.artUrl||null}}).catch(function(){}); }
+          })();
+        }
+        await lib._enriching;
+      }
+      if(!lib._needsEnrich){ ['title','artist','album','duration','bpm','artUrl'].forEach(function(k){ if(lib[k]!=null&&lib[k]!==''&&!(k==='duration'&&!lib[k])) t[k]=lib[k]; }); }
+    }catch(e){}
+  }
+  var _pa=window.playAt;
+  window.playAt=async function(idx){
+    try{
+      var pl=S.currentPL, t=pl&&pl.tracks&&pl.tracks[idx];
+      if(t){ await Promise.race([lazyEnrich(t),new Promise(function(r){setTimeout(r,3500);})]); }
+      // quietly get the next song ready too
+      if(pl&&pl.tracks&&pl.tracks.length){ var ni=(S.shuffle&&S.shuffledIndices&&S.shuffledIndices.length)?S.shuffledIndices[(S.shuffledIndices.indexOf(idx)+1)%S.shuffledIndices.length]:(idx+1)%pl.tracks.length; lazyEnrich(pl.tracks[ni]); }
+    }catch(e){}
+    return _pa.apply(this,arguments);
+  };
   post({type:'bb-ready'});
   document.documentElement.classList.add('bb-embed');
 })();
