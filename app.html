@@ -92,6 +92,13 @@ button{cursor:pointer;font-family:var(--font);font-size:13px}
 .song-card.played .song-label{color:var(--green-text)}
 .artist-part{font-weight:400;color:var(--text2)}
 .song-card.played .artist-part{color:var(--green-sub)}
+.song-whisper{margin-top:6px;padding:5px 8px;border-left:2px solid var(--gold);background:var(--gold-dim);border-radius:0 6px 6px 0;font-family:var(--serif);font-style:italic;font-size:13px;line-height:1.35;color:var(--text2);cursor:text;user-select:text}
+.whisper-tag{display:block;font-family:var(--cinzel);font-style:normal;font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:1px}
+.song-card.played .song-whisper{background:rgba(59,109,17,.10);border-left-color:var(--green-sub);color:var(--green-text)}
+.song-card.played .whisper-tag{color:var(--green-sub)}
+.whisper-banner{display:none;margin:-.5rem 0 1.25rem;padding:10px 16px;border-left:3px solid var(--gold);background:var(--gold-dim);border-radius:0 var(--radius) var(--radius) 0;font-family:var(--serif);font-style:italic;font-size:18px;line-height:1.4;color:var(--text)}
+.whisper-banner.show{display:block}
+.whisper-banner .whisper-tag{font-size:9px;margin-bottom:2px}
 .feed{margin-top:1.5rem}
 .feed-header{font-size:11px;font-family:var(--cinzel);letter-spacing:.08em;text-transform:uppercase;color:var(--text2);font-weight:500;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
 .feed-list{list-style:none;display:flex;flex-direction:column;gap:5px;max-height:300px;overflow-y:auto}
@@ -305,6 +312,7 @@ body.mp-open #mp-tab{display:none}
     <div id="host-banner" class="banner-wrap" style="display:none"></div>
     <div class="page-title" id="host-title">Music Bingo — Host Tool</div>
     <div class="page-sub">Tap a song when it plays. Check the played list to verify bingo calls.</div>
+    <div class="whisper-banner" id="whisper-banner"></div>
     <div id="player-link-indicator" style="display:none;margin-bottom:1.25rem;padding:10px 16px;background:#fffbe6;border:1.5px solid var(--gold);border-radius:var(--radius);font-family:var(--cinzel);font-size:11px;letter-spacing:.08em;color:#7a5500;align-items:center;gap:10px">
       <span style="font-size:18px">&#9835;</span>
       <span><strong>Media Player Linked</strong> &mdash; songs will auto-tick when played</span>
@@ -763,19 +771,30 @@ function showError(msg){
 // ── PARSE ─────────────────────────────────────────────────────────────────────
 function parseSongs(lines){
   return lines.map((line,i)=>{
-    const tsMatch=line.match(/\[(\d+:\d{2})\]\s*$/);
-    const ts=tsMatch?tsMatch[1]:'';
-    const clean=tsMatch?line.slice(0,tsMatch.index).trim():line.trim();
+    // Optional host-only whisper: "Song - Artist || tidbit for the host" (never printed on cards)
+    let whisper='';
+    const wi=line.indexOf('||');
+    if(wi!==-1){whisper=line.slice(wi+2).trim();line=line.slice(0,wi).trim();}
+    const tsRe=/\[(\d+:\d{2})\]\s*$/;
+    let ts='',clean=line.trim();
+    let tm=clean.match(tsRe);
+    if(tm){ts=tm[1];clean=clean.slice(0,tm.index).trim();}
+    else if(whisper){tm=whisper.match(tsRe);if(tm){ts=tm[1];whisper=whisper.slice(0,tm.index).trim();}}
     const idx=clean.search(/\s[\u2013\u2014\-]\s/);
     const title=idx!==-1?clean.slice(0,idx).trim():clean.trim();
     const artist=idx!==-1?clean.slice(idx).replace(/^\s*[\u2013\u2014\-]\s*/,'').trim():'';
-    return{id:i,title,artist,ts,played:false};
+    return{id:i,title,artist,ts,whisper,played:false};
   });
 }
 function fmtLabel(s){
   if(CLASSIC_BINGO) return`<span style="font-family:var(--cinzel);font-weight:700">${s.col}${s.title}</span>`;
   const tsHTML=s.ts?` <span class="song-ts">${s.ts}</span>`:'';
   return s.artist?`${s.title} <span class="artist-part">\u2013 ${s.artist}</span>${tsHTML}`:`${s.title}${tsHTML}`;
+}
+function whisperHTML(s){
+  if(!s||!s.whisper)return'';
+  const t=String(s.whisper).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return`<div class="song-whisper" onclick="event.stopPropagation()"><span class="whisper-tag">Whisper</span>${t}</div>`;
 }
 function fmtPlain(s){
   if(CLASSIC_BINGO) return`${s.col}${s.title}`;
@@ -823,7 +842,7 @@ function renderPlayLog(){
     const tsHTML=s.ts?` <span class="song-ts">${s.ts}</span>`:'';
     return`<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--green-bg);border:.5px solid var(--green-border);border-radius:var(--radius)">
       <span style="font-size:11px;color:var(--green-sub);min-width:24px;font-family:var(--cinzel);font-weight:600">#${n}</span>
-      <span style="flex:1;font-size:13px;color:var(--green-text)">${fmtLabel(s)}${tsHTML}</span>
+      <span style="flex:1;font-size:13px;color:var(--green-text)">${fmtLabel(s)}${tsHTML}${whisperHTML(s)}</span>
       <button onclick="hostToggle(${s.id})" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='none'">undo</button>
     </div>`;
   }).join('');
@@ -831,7 +850,7 @@ function renderPlayLog(){
   const remaining = allSongs.filter(s=>!s.played).map(s=>{
     const tsHTML=s.ts?` <span class="song-ts">${s.ts}</span>`:'';
     return`<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius);cursor:pointer" onclick="hostToggle(${s.id});renderPlayLog()">
-      <span style="flex:1;font-size:13px;color:var(--text)">${fmtLabel(s)}${tsHTML}</span>
+      <span style="flex:1;font-size:13px;color:var(--text)">${fmtLabel(s)}${tsHTML}${whisperHTML(s)}</span>
       <span style="font-size:11px;color:var(--text3);font-family:var(--cinzel);letter-spacing:.06em">tap to play</span>
     </div>`;
   }).join('');
@@ -856,7 +875,7 @@ function renderHostGrid(filter=''){
   const normQ=s=>s.toLowerCase().replace(/[\u2018\u2019\u0060\u00b4\u02bc]/g,"'");
   const vis=filter?allSongs.filter(s=>normQ(s.title).includes(filter)||normQ(s.artist||'').includes(filter)):allSongs;
   if(!vis.length){grid.innerHTML='<div class="no-results">No songs match.</div>';return;}
-  grid.innerHTML=vis.map(s=>`<div class="song-card${s.played?' played':''}" onclick="hostToggle(${s.id})"><div class="song-label">${fmtLabel(s)}</div></div>`).join('');
+  grid.innerHTML=vis.map(s=>`<div class="song-card${s.played?' played':''}" onclick="hostToggle(${s.id})"><div class="song-label">${fmtLabel(s)}</div>${whisperHTML(s)}</div>`).join('');
 }
 function hostReset(){
   resetSnapshot={
@@ -976,7 +995,17 @@ function hostToggle(id){
   if(document.getElementById('hpanel-log')&&document.getElementById('hpanel-log').style.display!=='none') renderPlayLog();
   syncCalled();
 }
+function updateWhisperBanner(){
+  const el=document.getElementById('whisper-banner');if(!el)return;
+  const last=hostPlayedOrder.length?allSongs.find(x=>x.id===hostPlayedOrder[hostPlayedOrder.length-1]):null;
+  if(last&&last.whisper){
+    const t=String(last.whisper).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    el.innerHTML=`<span class="whisper-tag">Whisper</span>${t}`;
+    el.classList.add('show');
+  }else{el.classList.remove('show');el.innerHTML='';}
+}
 function updateHostStats(){
+  updateWhisperBanner();
   const p=allSongs.filter(s=>s.played).length;
   document.getElementById('h-played').textContent=p;
   document.getElementById('h-remain').textContent=allSongs.length-p;
@@ -990,7 +1019,7 @@ function renderHostFeed(){
   list.innerHTML=[...hostPlayedOrder].reverse().map((id,i)=>{
     const s=allSongs.find(x=>x.id===id),n=hostPlayedOrder.length-i;
     const tsHTML=s.ts?` <span class="feed-ts">${s.ts}</span>`:'';
-    return`<li class="feed-item"><span class="feed-num">#${n}</span><div class="feed-label">${fmtLabel(s)}${tsHTML}</div><button class="feed-undo" onclick="hostToggle(${id})">undo</button></li>`;
+    return`<li class="feed-item"><span class="feed-num">#${n}</span><div class="feed-label">${fmtLabel(s)}${tsHTML}${whisperHTML(s)}</div><button class="feed-undo" onclick="hostToggle(${id})">undo</button></li>`;
   }).join('');
 }
 
