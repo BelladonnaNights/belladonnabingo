@@ -892,7 +892,10 @@ function vaultSongsToText(songs, fmt) {
     var b = fmt === 'artist' ? (a || m) : (m || a);
     var nz = function(z) { return String(z || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); };
     if (b && b === m && nz(m) && nz(t).indexOf(nz(m)) !== -1) b = '';   // the show/movie name is already in the song title — don't repeat it
-    return t ? (b ? t + ' – ' + b : t) : '';
+    var line = t ? (b ? t + ' \u2013 ' + b : t) : '';
+    // Host-only whisper: the Bingo app reads everything after " || " as a tidbit for the host (never printed on cards)
+    var w = String(x.w || '').replace(/\s*\|\|\s*/g, ' ').replace(/\s*[\r\n]+\s*/g, ' ').trim();
+    return line && w ? line + ' || ' + w : line;
   }).filter(Boolean).join('\n');
 }
 function normVaultName(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
